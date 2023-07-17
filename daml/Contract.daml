@@ -1,0 +1,103 @@
+module Contract where
+
+data AccountInfo = AccountInfo with
+  username: Text
+  msg: Text
+    deriving(Show, Eq)
+
+template Product 
+  with
+    issuer: Party
+    owner: Party
+    shop: Party
+    price: Int
+  where
+    signatory shop, issuer
+    observer owner
+    
+    choice TransferProduct: ContractId Product
+      with buyer: Party
+      controller owner
+        do
+          create this with
+            owner = buyer
+
+    choice UpdatePrice: ContractId Product
+      with newPrice: Int
+      controller owner
+        do
+          create this with
+            price = newPrice
+
+    nonconsuming choice QueryPrice: Int
+      controller owner
+      do
+        return price
+
+-- Input Amount Validating Function For Deposit
+eitherCheck : Int -> Either Text Int
+eitherCheck x = 
+    if(x < 0) then
+        Left "Negative amount"
+    else Right x
+    
+-- Input Amount Validating Function For Transfer
+checkValid2 x y
+  | (x <= 0) = False
+  | (x > y) = False
+  | otherwise = True
+
+template ShopAccount
+  with
+    owner: Party
+    shop: Party
+    balance: Int
+    info: AccountInfo
+  where
+    signatory shop, owner
+    observer owner
+
+    key (owner, info.username) : (Party, Text)
+    maintainer key._1
+
+    choice Deposit: ContractId ShopAccount
+      with amount: Int
+      controller owner
+        do
+          let check = eitherCheck amount
+          assertMsg "Invalid amount" (amount >= 0)
+          create this with
+            balance = balance + amount 
+
+    choice TransferBalance: (ContractId ShopAccount, ContractId ShopAccount)
+      with 
+        amount: Int
+        targetAccountCid: ContractId ShopAccount
+        targetUser: Party
+        targetBalance: Int
+        targetInfo: AccountInfo
+      controller owner, targetUser
+        do
+          let check = checkValid2 amount balance
+          assertMsg "Invalid input amount" (check)
+          
+          archive targetAccountCid
+          newOwnerAccountCid <- create ShopAccount 
+            with owner=this.owner, shop=this.shop, balance=this.balance-amount, info=this.info
+          newTargetAccountCid <- create ShopAccount
+            with owner=targetUser, shop=this.shop, balance=targetBalance+amount, info=targetInfo
+
+          return (newOwnerAccountCid, newTargetAccountCid)
+
+    nonconsuming choice QueryBalance: Int
+      controller owner
+        do
+          return balance
+
+     
+
+
+    
+
+
+

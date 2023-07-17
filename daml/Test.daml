@@ -1,0 +1,209 @@
+module Test where
+import Daml.Script
+import Contract
+
+-- Modularized Testing Set Up
+data TestParties = TestParties with
+    alice: Party
+    bob: Party
+    shop: Party
+
+setUpParties = do
+    alice <- allocateParty "Alice"
+    bob <- allocateParty "Bob"
+    shop <- allocateParty "Shop"
+    return $ TestParties
+        with
+            alice = alice
+            bob = bob
+            shop = shop
+
+setUpProduct i o s p = do
+    submitMulti [s,i] [] do
+        createCmd Product with issuer=i; owner=o; shop=s; price=p
+
+setUpInfo u m = do
+    return AccountInfo with
+        username = u
+        msg = m
+
+setUpAccount o s b i = do
+    submitMulti [o,s] [] do
+        createCmd ShopAccount with owner=o; shop=s; balance=b; info=i
+
+-- Test Create Product
+canCreateProduct = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    searchProduct <- queryContractId testParties.alice testProduct
+    
+    debug $ searchProduct
+
+-- Test Create Account
+canCreateAccount = do
+    testParties <- setUpParties
+    testInfo <- setUpInfo "alice123" "Hi im Alice" 
+    testAccount <- setUpAccount testParties.alice testParties.shop 100 testInfo
+
+    searchAccount <- queryContractId testParties.alice testAccount
+
+    debug $ searchAccount
+
+-- Test Transfer Product: happy path
+canTransferProduct = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    submit testParties.alice do
+        exerciseCmd testProduct TransferProduct with buyer=testParties.bob
+    
+-- Test Transfer Product: unhappy path
+cantTransferProduct = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    submitMustFail testParties.bob do
+        exerciseCmd testProduct TransferProduct with buyer=testParties.bob
+
+-- Test Update Price: happy path
+canUpdatePrice = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    submit testParties.alice do
+        exerciseCmd testProduct UpdatePrice with newPrice = 50
+    
+-- Test Update Price: unhappy path
+cantUpdatePrice = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    submitMustFail testParties.bob do
+        exerciseCmd testProduct UpdatePrice with newPrice = 50
+
+-- Test Query Price: happy path
+canQueryPrice = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    queryPrice <- submit testParties.alice do
+        exerciseCmd testProduct QueryPrice
+    
+    assert $ queryPrice == 30
+    
+
+-- Test Query Price: unhappy path
+cantQueryPrice = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+
+    submitMustFail testParties.bob do
+        exerciseCmd testProduct UpdatePrice with newPrice = 50
+
+-- Test Deposit: happy path
+canDeposit = do
+    testParties <- setUpParties
+    testInfo <- setUpInfo "alice123" "Hi im alice"
+    testAccount <- setUpAccount testParties.alice testParties.shop 100 testInfo
+
+    submit testParties.alice do
+        exerciseCmd testAccount Deposit with amount = 50
+
+-- Test Deposit: unhappy path
+cantDeposit = do
+    testParties <- setUpParties
+    testInfo <- setUpInfo "alice123" "Hi im alice"
+    testAccount <- setUpAccount testParties.alice testParties.shop 100 testInfo
+
+    submitMustFail testParties.alice do
+        exerciseCmd testAccount Deposit with amount = -50
+
+-- Test Transfer Balance: happy path
+canTransferBalance = do
+    testParties <- setUpParties
+    testInfoAlice <- setUpInfo "alice123" "Hi im alice"
+    testInfoBob <- setUpInfo "bob423" "Hi im bob :)"
+    testAccountAlice <- setUpAccount testParties.alice testParties.shop 100 testInfoAlice
+    testAccountBob <- setUpAccount testParties.bob testParties.shop 100 testInfoBob
+
+    submitMulti [testParties.alice, testParties.bob] [] do
+        exerciseCmd testAccountAlice TransferBalance with
+            amount = 50
+            targetAccountCid = testAccountBob
+            targetUser = testParties.bob
+            targetBalance = 100
+            targetInfo = testInfoBob
+
+-- Test Transfer Balance: unhappy path
+cantTransferBalance = do
+    testParties <- setUpParties
+    testInfoAlice <- setUpInfo "alice123" "Hi im alice"
+    testInfoBob <- setUpInfo "bob423" "Hi im bob :)"
+    testAccountAlice <- setUpAccount testParties.alice testParties.shop 100 testInfoAlice
+    testAccountBob <- setUpAccount testParties.bob testParties.shop 100 testInfoBob
+
+    submitMultiMustFail [testParties.alice, testParties.bob] [] do
+        exerciseCmd testAccountAlice TransferBalance with
+            amount = 500
+            targetAccountCid = testAccountBob
+            targetUser = testParties.bob
+            targetBalance = 100
+            targetInfo = testInfoBob
+
+-- Test QueryBalance: happy path
+canQueryBalance = do
+    testParties <- setUpParties
+    testInfo <- setUpInfo "alice123" "Hi im alice"
+    testAccount <- setUpAccount testParties.alice testParties.shop 100 testInfo
+
+    submit testParties.alice do
+        exerciseCmd testAccount QueryBalance
+
+-- Test QueryBalance: unhappy path
+cantQueryBalance = do
+    testParties <- setUpParties
+    testInfo <- setUpInfo "alice123" "Hi im alice"
+    testAccount <- setUpAccount testParties.alice testParties.shop 100 testInfo
+
+    submitMustFail testParties.bob do
+        exerciseCmd testAccount QueryBalance
+
+-- Test Query All Products Belong to Alice
+showAllPrices x = foldl (\ acc y -> acc <> " " <> show y._2.price) "" x
+testQueryAll = do
+    testParties <- setUpParties
+    testProduct1 <- setUpProduct testParties.alice testParties.alice testParties.shop 30
+    testProduct2 <- setUpProduct testParties.alice testParties.alice testParties.shop 40
+    testProduct3 <- setUpProduct testParties.alice testParties.alice testParties.shop 50
+
+    searchProducts <- query @Product testParties.alice
+    
+    debug $ showAllPrices searchProducts
+
+-- Test Full Workflow
+testFullFlow = do
+    testParties <- setUpParties
+    testProduct <- setUpProduct testParties.bob testParties.bob testParties.shop 30
+    testInfoAlice <- setUpInfo "alice123" "Hi im alice"
+    testInfoBob <- setUpInfo "bob423" "Hi im bob :)"
+    testAccountAlice <- setUpAccount testParties.alice testParties.shop 100 testInfoAlice
+    testAccountBob <- setUpAccount testParties.bob testParties.shop 100 testInfoBob
+
+    -- Alice Pay To Bob
+    submitMulti [testParties.alice, testParties.bob] [] do
+        exerciseCmd testAccountAlice TransferBalance with
+            amount = 50
+            targetAccountCid = testAccountBob
+            targetUser = testParties.bob
+            targetBalance = 100
+            targetInfo = testInfoBob
+    
+    -- Bob Give Product To Alice
+    submit testParties.bob do
+        exerciseCmd testProduct TransferProduct with buyer=testParties.alice
+    
+
+
+
+

@@ -1,0 +1,54 @@
+module Main where
+import Daml.Script
+import Contract
+
+initializeUsers = do
+    alice <- allocatePartyWithHint "Alice" (PartyIdHint "Alice")
+    shop <- allocatePartyWithHint "Shop" (PartyIdHint "Shop")
+    bob <- allocatePartyWithHint "Bob" (PartyIdHint "Bob")
+
+    shopId <- validateUserId "Shop"
+    aliceId <- validateUserId "Alice"
+    bobId <- validateUserId "Bob"
+    
+    createUser (User shopId (Some shop)) [CanActAs shop]
+    createUser (User aliceId (Some alice)) [CanActAs alice]
+    createUser (User bobId (Some bob)) [CanActAs bob]
+
+    product1Id <- submitMulti [shop,alice] [] do
+        createCmd Product with
+            issuer = alice
+            owner = alice
+            shop = shop
+            price = 30
+    
+    product2Id <- submitMulti [shop,bob] [] do
+        createCmd Product with
+            issuer = bob
+            owner = bob
+            shop = shop
+            price = 40
+
+    let 
+        infoAlice = AccountInfo with
+            username = "Alice123"
+            msg = "Hi all"
+        infoBob = AccountInfo with
+            username = "Bob34534"
+            msg = "Hi all im Bob"
+    
+    accountAliceId <- submitMulti [shop,alice] [] do
+        createCmd ShopAccount with
+            owner = alice
+            shop = shop
+            balance = 100
+            info = infoAlice
+
+    accountBobId <- submitMulti [shop,bob] [] do
+        createCmd ShopAccount with
+            owner = bob
+            shop = shop
+            balance = 100
+            info = infoBob
+    
+    return ()
